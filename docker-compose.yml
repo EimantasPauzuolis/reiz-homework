@@ -1,51 +1,110 @@
 services:
-  nginx:
-    image: nginx:1.27-alpine
-    ports: ["8080:80"]
-    volumes:
-      - ./:/var/www/html:cached
-      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
-    depends_on: [app]
-
-  app:
+  setup:
+    image: reiz-homework/app:dev
     build:
       context: .
-      dockerfile: docker/php/Dockerfile
+      dockerfile: ./docker/php/Dockerfile
+    command: >
+      sh -c "
+        composer install --prefer-dist --no-interaction --no-progress &&
+        echo '[setup] ready'
+      "
     volumes:
-      - ./:/var/www/html:cached
-    depends_on: [redis]
+      - ./:/var/www/html
+      - composer-cache:/home/app/.composer/cache
+    networks:
+      - reiz-homework
+    restart: "no"
+
+  php-fpm:
+    image: reiz-homework/app:dev
+    build:
+      context: .
+      dockerfile: ./docker/php/Dockerfile
+    volumes:
+      - ./:/var/www/html
+      - composer-cache:/home/app/.composer/cache
     environment:
-      APP_ENV: local
       REDIS_HOST: redis
       QUEUE_CONNECTION: redis
       CACHE_STORE: redis
       SESSION_DRIVER: redis
+      SELENIUM_HOST: http://selenium:4444
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    networks:
+      - reiz-homework
+    restart: unless-stopped
 
-  worker:
+  queue:
+    image: reiz-homework/app:dev
     build:
       context: .
-      dockerfile: docker/php/Dockerfile
+      dockerfile: ./docker/php/Dockerfile
     command: php artisan queue:work redis --tries=3 --timeout=180 --sleep=1
     volumes:
-      - ./:/var/www/html:cached
-    depends_on: [redis, selenium]
+      - ./:/var/www/html
+      - composer-cache:/home/app/.composer/cache
     environment:
       REDIS_HOST: redis
       QUEUE_CONNECTION: redis
+      CACHE_STORE: redis
+      SESSION_DRIVER: redis
       SELENIUM_HOST: http://selenium:4444
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      selenium:
+        condition: service_started
+    networks:
+      - reiz-homework
+    restart: on-failure
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "${APP_PORT:-8080}:80"
+    volumes:
+      - ./public:/var/www/html/public:ro
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      php-fpm:
+        condition: service_started
+    networks:
+      - reiz-homework
     restart: unless-stopped
 
   redis:
     image: redis:7-alpine
-    volumes: [redis-data:/data]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - reiz-homework
+    restart: unless-stopped
 
   selenium:
     image: selenium/standalone-chromium:latest
     shm_size: 2gb
-    ports: ["4444:4444"]
     environment:
       SE_NODE_MAX_SESSIONS: 4
       SE_NODE_OVERRIDE_MAX_SESSIONS: "true"
+    networks:
+      - reiz-homework
+    restart: unless-stopped
+
+networks:
+  reiz-homework:
 
 volumes:
   redis-data:
+  composer-cache:

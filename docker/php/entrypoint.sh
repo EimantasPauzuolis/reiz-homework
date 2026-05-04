@@ -1,9 +1,11 @@
 #!/bin/sh
 set -e
 
-if [ ! -f /var/www/html/vendor/autoload.php ]; then
-    echo "[entrypoint] Installing composer dependencies..."
-    composer install --no-interaction --prefer-dist --optimize-autoloader
+cd /var/www/html
+
+if [ ! -f .env ] && [ -f .env.example ]; then
+    echo "[entrypoint] .env missing, copying .env.example"
+    cp .env.example .env
 fi
 
 exec "$@"

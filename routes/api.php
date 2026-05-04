@@ -1,8 +1,10 @@
 <?php
 
-use Illuminate\Http\Request;
+use App\Http\Controllers\Api\JobController;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/test', function (Request $request) {
-    return 'Hello world';
-});
+Route::post('jobs', [JobController::class, 'store']);
+Route::get('jobs/{id}', [JobController::class, 'show'])
+    ->whereUuid('id');
+Route::delete('jobs/{id}', [JobController::class, 'destroy'])
+    ->whereUuid('id');
